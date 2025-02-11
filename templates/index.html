@@ -1,0 +1,197 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detection System</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <style>
+        .video-container {
+            width: 100%;
+            height: 480px;
+            background-color: #000;
+            margin-top: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+        .video-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .status-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 1.2em;
+            text-align: center;
+            z-index: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold mb-6 text-center">AI Detection System</h1>
+        
+        <!-- Model Selection -->
+        <div class="mb-6">
+            <h2 class="text-lg font-semibold mb-2">Select Models</h2>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {% for model in models %}
+                <div class="flex items-center">
+                    <input type="checkbox" id="{{ model }}" name="models" value="{{ model }}" class="mr-2">
+                    <label for="{{ model }}" class="text-sm">{{ model }}</label>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Source Selection -->
+        <div class="mb-6">
+            <h2 class="text-lg font-semibold mb-2">Select Source</h2>
+            <div class="flex space-x-4">
+                <div class="flex items-center">
+                    <input type="radio" id="webcam" name="source" value="webcam" checked class="mr-2">
+                    <label for="webcam" class="text-sm">Webcam</label>
+                </div>
+                <div class="flex items-center">
+                    <input type="radio" id="video" name="source" value="video" class="mr-2">
+                    <label for="video" class="text-sm">Upload Video</label>
+                </div>
+            </div>
+            <div id="videoUpload" class="hidden mt-4">
+                <input type="file" name="video" accept="video/*" class="w-full">
+            </div>
+        </div>
+
+        <!-- Control Buttons -->
+        <div class="flex justify-center space-x-4 mb-6">
+            <button id="startBtn" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                Start Detection
+            </button>
+            <button id="stopBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600" disabled>
+                Stop Detection
+            </button>
+        </div>
+
+        <!-- Video Feed Container -->
+        <div class="video-container">
+            <div id="statusText" class="status-text">No video feed active</div>
+            <img id="videoFeed" class="video-feed hidden" alt="Video Feed">
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const videoUpload = document.getElementById('videoUpload');
+            const sourceInputs = document.querySelectorAll('input[name="source"]');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const videoFeed = document.getElementById('videoFeed');
+            const statusText = document.getElementById('statusText');
+            let isRunning = false;
+
+            // Toggle video upload visibility
+            sourceInputs.forEach(input => {
+                input.addEventListener('change', function() {
+                    videoUpload.classList.toggle('hidden', this.value === 'webcam');
+                });
+            });
+
+            // Start detection
+            startBtn.addEventListener('click', async function() {
+                const selectedModels = Array.from(document.querySelectorAll('input[name="models"]:checked'))
+                    .map(input => input.value);
+                
+                if (selectedModels.length === 0) {
+                    alert('Please select at least one model');
+                    return;
+                }
+
+                const sourceType = document.querySelector('input[name="source"]:checked').value;
+                const videoFile = document.querySelector('input[type="file"]').files[0];
+                
+                if (sourceType === 'video' && !videoFile) {
+                    alert('Please select a video file');
+                    return;
+                }
+
+                try {
+                    statusText.textContent = 'Starting detection...';
+                    
+                    const formData = new FormData();
+                    selectedModels.forEach(model => formData.append('models', model));  // Append each model as a separate entry
+                    formData.append('source_type', sourceType);
+                    
+                    if (sourceType === 'video') {
+                        formData.append('video', videoFile);
+                    }
+
+                    const response = await fetch('/start_detection', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        isRunning = true;
+                        statusText.classList.add('hidden');
+                        videoFeed.src = '/video_feed?' + new Date().getTime();
+                        videoFeed.classList.remove('hidden');
+                        startBtn.disabled = true;
+                        stopBtn.disabled = false;
+                        
+                        // Add error handling for video feed
+                        videoFeed.onerror = function() {
+                            statusText.textContent = 'Error loading video feed';
+                            statusText.classList.remove('hidden');
+                            videoFeed.classList.add('hidden');
+                        };
+                        
+                        // Check if video feed is actually playing
+                        setTimeout(() => {
+                            if (!videoFeed.complete || videoFeed.naturalHeight === 0) {
+                                statusText.textContent = 'Video feed not receiving data';
+                                statusText.classList.remove('hidden');
+                            }
+                        }, 3000);
+                    } else {
+                        throw new Error(data.message || 'Failed to start detection');
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    statusText.textContent = `Error: ${error.message}`;
+                    statusText.classList.remove('hidden');
+                    videoFeed.classList.add('hidden');
+                }
+            });
+
+            // Stop detection
+            stopBtn.addEventListener('click', async function() {
+                try {
+                    const response = await fetch('/stop_detection');
+                    if (response.ok) {
+                        isRunning = false;
+                        videoFeed.classList.add('hidden');
+                        statusText.textContent = 'No video feed active';
+                        statusText.classList.remove('hidden');
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('An error occurred while stopping detection');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
